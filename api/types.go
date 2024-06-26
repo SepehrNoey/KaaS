@@ -4,10 +4,10 @@ import "time"
 
 type AppRequest struct {
 	Name           string            `json:"name"`
-	Namespace      string            `json:"namespace"`
 	Replicas       int32             `json:"replicas"`
 	Image          string            `json:"image"`
 	ImageTag       string            `json:"image_tag"`
+	DomainAddress  string            `json:"domain_address"`
 	Port           int32             `json:"port"`
 	Resources      string            `json:"resources"` // includes CPU,RAM,DISK respectively. For instance: "500m,128Mi,1Gi"
 	Envs           map[string]string `json:"envs"`
@@ -32,6 +32,6 @@ type AppStatus struct {
 	ErrMsg         string      `json:"err_msg"`
 }
 
-type AppsStatus struct {
-	Apps []AppsStatus `json:"apps"`
+type AllAppsStatus struct {
+	Apps []AppStatus `json:"apps"`
 }

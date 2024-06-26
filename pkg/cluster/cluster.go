@@ -8,6 +8,7 @@ import (
 	"github.com/SepehrNoey/KaaS/api"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -31,9 +32,10 @@ func NewClusterManager() (*ClusterManager, error) {
 }
 
 func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) error {
+	namespace := "default"
 	parts := strings.Split(appreq.Resources, ",")
 	if len(parts) != 3 {
-		return fmt.Errorf("expected 3 parts, got %d", len(parts))
+		return fmt.Errorf("expected 3 parts for resources, got %d", len(parts))
 	}
 
 	cpu := parts[0]
@@ -77,7 +79,7 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appreq.Name,
-			Namespace: appreq.Namespace,
+			Namespace: namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
@@ -107,20 +109,17 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		},
 	}
 
-	_, err := c.Clientset.AppsV1().Deployments(appreq.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
+	_, err := c.Clientset.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %v", err)
 	}
 
 	serviceType := corev1.ServiceTypeClusterIP
-	if appreq.ExternalAccess {
-		serviceType = corev1.ServiceTypeLoadBalancer
-	}
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appreq.Name,
-			Namespace: appreq.Namespace,
+			Namespace: namespace,
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{"app": appreq.Name},
@@ -133,15 +132,60 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		},
 	}
 
-	_, err = c.Clientset.CoreV1().Services(appreq.Namespace).Create(ctx, service, metav1.CreateOptions{})
+	_, err = c.Clientset.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create service: %v", err)
+	}
+
+	if appreq.ExternalAccess {
+		pathType := netv1.PathTypePrefix
+		host := fmt.Sprintf("%s.kaas.local", appreq.Name)
+		ingress := &netv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appreq.Name,
+				Namespace: namespace,
+				Annotations: map[string]string{
+					"nginx.ingress.kubernetes.io/rewrite-target": "/",
+				},
+			},
+			Spec: netv1.IngressSpec{
+				Rules: []netv1.IngressRule{
+					{
+						Host: host,
+						IngressRuleValue: netv1.IngressRuleValue{
+							HTTP: &netv1.HTTPIngressRuleValue{
+								Paths: []netv1.HTTPIngressPath{
+									{
+										Path:     "/",
+										PathType: &pathType,
+										Backend: netv1.IngressBackend{
+											Service: &netv1.IngressServiceBackend{
+												Name: service.Name,
+												Port: netv1.ServiceBackendPort{
+													Number: appreq.Port,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		_, err := c.Clientset.NetworkingV1().Ingresses(namespace).Create(ctx, ingress, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create ingress: %v", err)
+		}
 	}
 
 	return nil
 }
 
-func (c *ClusterManager) GetAppStatus(ctx context.Context, name, namespace string) (api.AppStatus, error) {
+func (c *ClusterManager) GetAppStatus(ctx context.Context, name string) (api.AppStatus, error) {
+	namespace := "default"
 	deployment, err := c.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return api.AppStatus{}, fmt.Errorf("failed to get deployment: %v", err)
@@ -174,7 +218,8 @@ func (c *ClusterManager) GetAppStatus(ctx context.Context, name, namespace strin
 	}, nil
 }
 
-func (c *ClusterManager) GetAllAppsStatus(ctx context.Context, namespace string) ([]api.AppStatus, error) {
+func (c *ClusterManager) GetAllAppsStatus(ctx context.Context) ([]api.AppStatus, error) {
+	namespace := "default"
 	deployments, err := c.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployments: %v", err)
@@ -182,7 +227,7 @@ func (c *ClusterManager) GetAllAppsStatus(ctx context.Context, namespace string)
 
 	var statuses []api.AppStatus
 	for _, deployment := range deployments.Items {
-		status, err := c.GetAppStatus(ctx, deployment.Name, deployment.Namespace)
+		status, err := c.GetAppStatus(ctx, deployment.Name)
 		if err != nil {
 			statuses = append(statuses, api.AppStatus{
 				DeploymentName: deployment.Name,
