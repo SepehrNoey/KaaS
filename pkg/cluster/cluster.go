@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/SepehrNoey/KaaS/api"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
 type ClusterManager struct {
@@ -20,7 +22,12 @@ type ClusterManager struct {
 }
 
 func NewClusterManager() (*ClusterManager, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+	var kubeconfig string
+	if home := homedir.HomeDir(); home != "" {
+		kubeconfig = filepath.Join(home, ".kube", "config")
+	}
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +100,9 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  appreq.Name,
-							Image: appreq.Image,
+							Name:            appreq.Name,
+							Image:           appreq.Image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: appreq.Port,
@@ -114,7 +122,7 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		return fmt.Errorf("failed to create deployment: %v", err)
 	}
 
-	serviceType := corev1.ServiceTypeClusterIP
+	serviceType := corev1.ServiceTypeNodePort
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -138,46 +146,8 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 	}
 
 	if appreq.ExternalAccess {
-		pathType := netv1.PathTypePrefix
-		host := fmt.Sprintf("%s.kaas.local", appreq.Name)
-		ingress := &netv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      appreq.Name,
-				Namespace: namespace,
-				Annotations: map[string]string{
-					"nginx.ingress.kubernetes.io/rewrite-target": "/",
-				},
-			},
-			Spec: netv1.IngressSpec{
-				Rules: []netv1.IngressRule{
-					{
-						Host: host,
-						IngressRuleValue: netv1.IngressRuleValue{
-							HTTP: &netv1.HTTPIngressRuleValue{
-								Paths: []netv1.HTTPIngressPath{
-									{
-										Path:     "/",
-										PathType: &pathType,
-										Backend: netv1.IngressBackend{
-											Service: &netv1.IngressServiceBackend{
-												Name: service.Name,
-												Port: netv1.ServiceBackendPort{
-													Number: appreq.Port,
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		_, err := c.Clientset.NetworkingV1().Ingresses(namespace).Create(ctx, ingress, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create ingress: %v", err)
+		if err := c.updateIngress(ctx, appreq); err != nil {
+			return err
 		}
 	}
 
@@ -239,4 +209,66 @@ func (c *ClusterManager) GetAllAppsStatus(ctx context.Context) ([]api.AppStatus,
 	}
 
 	return statuses, nil
+}
+
+func (c *ClusterManager) updateIngress(ctx context.Context, appreq *api.AppRequest) error {
+	namespace := "default"
+	ingName := "kaas-ingress"
+	ingClassName := "nginx"
+	ingClient := c.Clientset.NetworkingV1().Ingresses(namespace)
+	_, err := ingClient.Get(ctx, ingName, metav1.GetOptions{})
+	if err != nil {
+		// no ingress created yet, so we should create one
+		ingress := &netv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      ingName,
+				Namespace: namespace,
+			},
+			Spec: netv1.IngressSpec{
+				IngressClassName: &ingClassName,
+			},
+		}
+
+		_, err := c.Clientset.NetworkingV1().Ingresses(namespace).Create(ctx, ingress, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create ingress: %v", err)
+		}
+	}
+
+	// updating rules
+	ingress, err := ingClient.Get(ctx, ingName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Ingress resource: %v", err)
+	}
+
+	pathType := netv1.PathTypePrefix
+	host := appreq.DomainAddress
+	ingress.Spec.Rules = append(ingress.Spec.Rules, netv1.IngressRule{
+		Host: host,
+		IngressRuleValue: netv1.IngressRuleValue{
+			HTTP: &netv1.HTTPIngressRuleValue{
+				Paths: []netv1.HTTPIngressPath{
+					{
+						Path:     "/",
+						PathType: &pathType,
+						Backend: netv1.IngressBackend{
+							Service: &netv1.IngressServiceBackend{
+								Name: appreq.Name,
+								Port: netv1.ServiceBackendPort{
+									Number: appreq.Port,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err = ingClient.Update(ctx, ingress, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update Ingress resource: %v", err)
+	}
+
+	return nil
 }

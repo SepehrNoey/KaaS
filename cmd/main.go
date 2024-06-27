@@ -18,9 +18,9 @@ func main() {
 	h := handlers.NewHandler(cm)
 
 	router := mux.NewRouter()
-	router.HandleFunc("api/apps/", h.AddApp).Methods("POST")
-	router.HandleFunc("api/apps/{name}", h.GetAppStatus).Methods("GET")
-	router.HandleFunc("api/apps/", h.GetAllAppsStatus).Methods("GET")
+	router.HandleFunc("/api/apps/", h.AddApp).Methods("POST")
+	router.HandleFunc("/api/apps/{name}", h.GetAppStatus).Methods("GET")
+	router.HandleFunc("/api/apps/", h.GetAllAppsStatus).Methods("GET")
 
 	log.Println("Starting server on :2024")
 	if err := http.ListenAndServe(":2024", router); err != nil {
