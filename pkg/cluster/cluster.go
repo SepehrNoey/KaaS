@@ -15,24 +15,42 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+type CnfMapVals struct {
+	IngressName string
+	Namespace   string
+}
+
 type ClusterManager struct {
 	Clientset *kubernetes.Clientset
+	Configs   CnfMapVals
 }
 
 func NewClusterManager() (*ClusterManager, error) {
-	config, err := rest.InClusterConfig()
+	conf, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get in-cluster config: %v", err)
 	}
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(conf)
 	if err != nil {
 		return nil, err
 	}
-	return &ClusterManager{Clientset: clientset}, nil
+
+	cm, err := clientset.CoreV1().ConfigMaps("default").Get(context.Background(), "kaas-config", metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return &ClusterManager{
+		Clientset: clientset,
+		Configs: CnfMapVals{
+			IngressName: cm.Data["ingress.name"],
+			Namespace:   cm.Data["namespace"],
+		},
+	}, nil
 }
 
 func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) error {
-	namespace := "default"
+	namespace := c.Configs.Namespace
 	parts := strings.Split(appreq.Resources, ",")
 	if len(parts) != 3 {
 		return fmt.Errorf("expected 3 parts for resources, got %d", len(parts))
@@ -148,7 +166,7 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 }
 
 func (c *ClusterManager) GetAppStatus(ctx context.Context, name string) (api.AppStatus, error) {
-	namespace := "default"
+	namespace := c.Configs.Namespace
 	deployment, err := c.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return api.AppStatus{}, fmt.Errorf("failed to get deployment: %v", err)
@@ -182,7 +200,7 @@ func (c *ClusterManager) GetAppStatus(ctx context.Context, name string) (api.App
 }
 
 func (c *ClusterManager) GetAllAppsStatus(ctx context.Context) ([]api.AppStatus, error) {
-	namespace := "default"
+	namespace := c.Configs.Namespace
 	deployments, err := c.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployments: %v", err)
@@ -205,43 +223,15 @@ func (c *ClusterManager) GetAllAppsStatus(ctx context.Context) ([]api.AppStatus,
 }
 
 func (c *ClusterManager) updateIngress(ctx context.Context, appreq *api.AppRequest) error {
-	namespace := "default"
-	ingName := "kaas-ingress"
-	ingClassName := "nginx"
+	namespace := c.Configs.Namespace
+	ingName := c.Configs.IngressName
 	ingClient := c.Clientset.NetworkingV1().Ingresses(namespace)
-	_, err := ingClient.Get(ctx, ingName, metav1.GetOptions{})
-	if err != nil {
-		// no ingress created yet, so we should create one
-		ingress := &netv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      ingName,
-				Namespace: namespace,
-			},
-			Spec: netv1.IngressSpec{
-				IngressClassName: &ingClassName,
-				DefaultBackend: &netv1.IngressBackend{
-					Service: &netv1.IngressServiceBackend{
-						Name: "placeholder-service",
-						Port: netv1.ServiceBackendPort{
-							Number: 80,
-						},
-					},
-				},
-			},
-		}
-
-		_, err := c.Clientset.NetworkingV1().Ingresses(namespace).Create(ctx, ingress, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create ingress: %v", err)
-		}
-	}
-
-	// updating rules
 	ingress, err := ingClient.Get(ctx, ingName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Ingress resource: %v", err)
 	}
 
+	// updating rules
 	pathType := netv1.PathTypePrefix
 	host := appreq.DomainAddress
 	ingress.Spec.Rules = append(ingress.Spec.Rules, netv1.IngressRule{

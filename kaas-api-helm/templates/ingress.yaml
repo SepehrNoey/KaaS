@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.name }}
+  namespace: default
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  defaultBackend:
+    service:
+      name: placeholder-service
+      port:
+        number: 80
+
+# rules will be added dynamically in the code

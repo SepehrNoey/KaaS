@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Values.namespace | default "default" }}
+spec:
+  replicas: {{ .Values.deployment.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: kaas-api
+          image: "{{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag }}"
+          imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          env:
+            - name: KUBECONFIG
+              value: {{ .Values.deployment.kubeconfigPath }}
+          volumeMounts:
+            - name: kube-config-volume
+              mountPath: {{ .Values.deployment.volumeMountPath }}
+              readOnly: true
+          resources:
+            requests:
+              memory: {{ .Values.deployment.resources.requests.memory | default "128Mi" }}
+              cpu: {{ .Values.deployment.resources.requests.cpu | default "50m" }}
+            limits:
+              memory: {{ .Values.deployment.resources.limits.memory | default "256Mi" }}
+              cpu: {{ .Values.deployment.resources.limits.cpu | default "100m" }}
+      volumes:
+        - name: kube-config-volume
+          hostPath:
+            path: {{ .Values.deployment.hostPath }}
