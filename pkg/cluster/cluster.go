@@ -226,6 +226,14 @@ func (c *ClusterManager) updateIngress(ctx context.Context, appreq *api.AppReque
 			},
 			Spec: netv1.IngressSpec{
 				IngressClassName: &ingClassName,
+				DefaultBackend: &netv1.IngressBackend{
+					Service: &netv1.IngressServiceBackend{
+						Name: "placeholder-service",
+						Port: netv1.ServiceBackendPort{
+							Number: 80,
+						},
+					},
+				},
 			},
 		}
 
