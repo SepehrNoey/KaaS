@@ -45,9 +45,15 @@ func (h *Handler) GetAppStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(statuses); err != nil {
+	prettyJSON, err := json.MarshalIndent(statuses, "", "  ")
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(prettyJSON)
 }
 
 func (h *Handler) GetAllAppsStatus(w http.ResponseWriter, r *http.Request) {
@@ -56,10 +62,18 @@ func (h *Handler) GetAllAppsStatus(w http.ResponseWriter, r *http.Request) {
 	allStatuses, err := h.ClusterManager.GetAllAppsStatus(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	response := api.AllAppsStatus{Apps: allStatuses}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+
+	prettyJSON, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(prettyJSON)
 }

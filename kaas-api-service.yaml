@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kaas-api-service
+  namespace: default
+spec:
+  selector:
+    app: kaas-api
+  ports:
+    - protocol: TCP
+      port: 2024
+      targetPort: 2024
+  type: NodePort

@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kaas-api-role-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: kaas-api-service-account
+    namespace: default
+roleRef:
+  kind: Role
+  name: kaas-api-role
+  apiGroup: rbac.authorization.k8s.io
