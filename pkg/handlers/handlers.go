@@ -77,3 +77,20 @@ func (h *Handler) GetAllAppsStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(prettyJSON)
 }
+
+func (h *Handler) AddDB(w http.ResponseWriter, r *http.Request) {
+	var req api.DBRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	err := h.ClusterManager.DeployDatabase(ctx, &req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}

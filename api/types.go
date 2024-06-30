@@ -35,3 +35,9 @@ type AppStatus struct {
 type AllAppsStatus struct {
 	Apps []AppStatus `json:"apps"`
 }
+
+type DBRequest struct {
+	DBName         string `json:"name"`
+	Resources      string `json:"resources"` // includes CPU,RAM,DISK respectively. For instance: "500m,128Mi,1Gi"
+	ExternalAccess bool   `json:"external_access"`
+}

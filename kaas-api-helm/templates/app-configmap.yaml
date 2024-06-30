@@ -4,5 +4,5 @@ metadata:
   name: kaas-config
   namespace: default
 data:
-  namespace: {{ .Values.namespace }}
-  ingress.name: {{ .Values.ingress.name }}
+  namespace: "{{ .Values.namespace }}"
+  ingress.name: "{{ .Values.ingress.name }}"

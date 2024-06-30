@@ -1,9 +1,9 @@
-namespace: default
+namespace: "default"
 serviceAccount:
   name: kaas-api-service-account
 
 ingress:
-  name: kaas-ingress
+  name: "kaas-ingress"
   className: nginx
 
 deployment:
@@ -11,7 +11,7 @@ deployment:
 
   image:
     repository: kaas-api
-    tag: v2
+    tag: v2.1
     pullPolicy: IfNotPresent
 
   containerPort: 2024
@@ -34,3 +34,13 @@ service:
   port: 2024
   targetPort: 2024
   type: NodePort
+
+db:
+  replica: 1
+  maxConnections: 100
+  port: 5432
+  pvCapStorage: "2.5Gi"
+  pvcSize: "500Mi"
+  image:
+    repository: "postgres"
+    pullPolicy: "IfNotPresent"

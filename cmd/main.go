@@ -21,6 +21,7 @@ func main() {
 	router.HandleFunc("/api/apps/", h.AddApp).Methods("POST")
 	router.HandleFunc("/api/apps/{name}", h.GetAppStatus).Methods("GET")
 	router.HandleFunc("/api/apps/", h.GetAllAppsStatus).Methods("GET")
+	router.HandleFunc("/api/db/", h.AddDB).Methods("POST")
 
 	log.Println("Starting server on :2024")
 	if err := http.ListenAndServe(":2024", router); err != nil {

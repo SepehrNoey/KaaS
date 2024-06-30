@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-request-config
+  namespace: default
+data:
+  replica: "{{ .Values.db.replica }}"
+  maxConnections: "{{ .Values.db.maxConnections }}"
+  port: "{{ .Values.db.port }}"
+  pvcSize: "{{ .Values.db.pvcSize }}"
+  image.repository: "{{ .Values.db.image.repository }}"
+  image.pullPolicy: "{{ .Values.db.image.pullPolicy }}"
+
