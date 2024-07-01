@@ -41,3 +41,14 @@ type DBRequest struct {
 	Resources      string `json:"resources"` // includes CPU,RAM,DISK respectively. For instance: "500m,128Mi,1Gi"
 	ExternalAccess bool   `json:"external_access"`
 }
+
+type DBCredentials struct {
+	DBName      string `json:"name"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	ServiceName string `json:"service_name"` // equal to ClusterIP
+	ServicePort int32  `json:"service_port"` // port of service in the cluster
+	ExternalIP  string `json:"external_ip"`  // if ExternalAccess=true, ip of the node
+	NodePort    int32  `json:"node_port"`    // if ExternalAccess=true, port of the service on the node
+	ExternalURL string `json:"external_url"` // if ExternalAccess=true, external url of the service
+}

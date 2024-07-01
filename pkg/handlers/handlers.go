@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/SepehrNoey/KaaS/api"
@@ -85,12 +86,23 @@ func (h *Handler) AddDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("before deploying db server")
 	ctx := r.Context()
-	err := h.ClusterManager.DeployDatabase(ctx, &req)
+	creds, err := h.ClusterManager.DeployDBServer(ctx, &req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	fmt.Println("after deploying db server")
 
+	credsPretty, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Println("credsPretty are created:", string(credsPretty))
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	w.Write(credsPretty)
 }

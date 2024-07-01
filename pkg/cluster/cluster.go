@@ -13,6 +13,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -116,18 +117,40 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		})
 	}
 
-	for key, value := range appreq.Secrets {
-		env = append(env, corev1.EnvVar{
-			Name: key,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: value,
-					},
-					Key: key,
-				},
+	// if secrets are provided, a secret object must be created
+	if len(appreq.Secrets) > 0 {
+		secretName := appreq.Name + "-secret"
+		secretData := make(map[string]string)
+		for key, value := range appreq.Secrets {
+			secretData[key] = value
+		}
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
 			},
-		})
+			StringData: secretData,
+		}
+
+		_, err := c.Clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create secret: %v", err)
+		}
+
+		for key := range appreq.Secrets {
+			env = append(env, corev1.EnvVar{
+				Name: key,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: secretName,
+						},
+						Key: key,
+					},
+				},
+			})
+		}
 	}
 
 	deployment := &appsv1.Deployment{
@@ -148,7 +171,7 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 					Containers: []corev1.Container{
 						{
 							Name:            appreq.Name,
-							Image:           appreq.Image,
+							Image:           appreq.Image + ":" + appreq.ImageTag,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Ports: []corev1.ContainerPort{
 								{
@@ -303,7 +326,7 @@ func (c *ClusterManager) updateIngress(ctx context.Context, appreq *api.AppReque
 	return nil
 }
 
-func (c *ClusterManager) DeployDatabase(ctx context.Context, dbreq *api.DBRequest) error {
+func (c *ClusterManager) DeployDBServer(ctx context.Context, dbreq *api.DBRequest) (*api.DBCredentials, error) {
 	namespace := c.AppConf.Namespace
 
 	maxRand := 100000
@@ -312,7 +335,7 @@ func (c *ClusterManager) DeployDatabase(ctx context.Context, dbreq *api.DBReques
 	secretName := dbreq.DBName + "-secret"
 
 	if exists, err := c.resourceExists("secret", secretName); exists {
-		return fmt.Errorf("database with this name exists: %v", err)
+		return nil, fmt.Errorf("database with this name exists: %v", err)
 	}
 
 	secret := &corev1.Secret{
@@ -328,13 +351,13 @@ func (c *ClusterManager) DeployDatabase(ctx context.Context, dbreq *api.DBReques
 
 	_, err := c.Clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create secret: %v", err)
+		return nil, fmt.Errorf("failed to create secret: %v", err)
 	}
 
 	// parse resources
 	resources := strings.Split(dbreq.Resources, ",")
 	if len(resources) != 3 {
-		return fmt.Errorf("expected 3 parts for resources, got %d", len(resources))
+		return nil, fmt.Errorf("expected 3 parts for resources, got %d", len(resources))
 	}
 	cpu := resources[0]
 	memory := resources[1]
@@ -435,15 +458,10 @@ func (c *ClusterManager) DeployDatabase(ctx context.Context, dbreq *api.DBReques
 
 	_, err = c.Clientset.AppsV1().StatefulSets(namespace).Create(ctx, statefulSet, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create statefulset: %v", err)
+		return nil, fmt.Errorf("failed to create statefulset: %v", err)
 	}
 
 	// create service
-	serviceType := corev1.ServiceTypeClusterIP
-	if dbreq.ExternalAccess {
-		serviceType = corev1.ServiceTypeNodePort
-	}
-
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      dbreq.DBName,
@@ -456,16 +474,52 @@ func (c *ClusterManager) DeployDatabase(ctx context.Context, dbreq *api.DBReques
 					Port: c.DBConf.Port,
 				},
 			},
-			Type: serviceType,
+			Type: corev1.ServiceTypeClusterIP,
 		},
+	}
+
+	// if accessible from outside the cluster, shouod be converted to NodePort service
+	if dbreq.ExternalAccess {
+		service.Spec.Type = corev1.ServiceTypeNodePort
+		service.Spec.Ports[0].TargetPort = intstr.FromInt(int(c.DBConf.Port))
+		service.Spec.Ports[0].NodePort = int32(30000 + rand.Intn(2767))
 	}
 
 	_, err = c.Clientset.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create service: %v", err)
+		return nil, fmt.Errorf("failed to create service: %v", err)
 	}
 
-	return nil
+	// get external IPs
+	nodes, err := c.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %v", err)
+	}
+
+	IPs := []string{}
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP {
+				IPs = append(IPs, address.Address)
+			}
+		}
+	}
+	servicePort := service.Spec.Ports[0].Port
+	nodePort := service.Spec.Ports[0].NodePort
+	externalURL := fmt.Sprintf("http://%s:%s", IPs[0], strconv.FormatInt(int64(nodePort), 10))
+
+	creds := api.DBCredentials{
+		DBName:      dbreq.DBName,
+		Username:    username,
+		Password:    password,
+		ServiceName: service.Name,
+		ServicePort: servicePort,
+		ExternalIP:  IPs[0],
+		NodePort:    nodePort,
+		ExternalURL: externalURL,
+	}
+
+	return &creds, nil
 
 }
 
