@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: monitor-cronjob
+spec:
+  schedule: "*/5 * * * *" # this will be updated by the updater script
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: default
+          containers:
+            - name: monitor-cronjob
+              image: monitor-app:v2
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: POSTGRESQL_MASTER_HOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: postgresql-config
+                      key: POSTGRESQL_MASTER_HOST
+                - name: POSTGRESQL_SLAVE_HOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: postgresql-config
+                      key: POSTGRESQL_MASTER_HOST
+                - name: POSTGRESQL_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgresql-secret
+                      key: postgres-password
+          restartPolicy: OnFailure

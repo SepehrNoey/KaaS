@@ -23,6 +23,16 @@ spec:
           env:
             - name: KUBECONFIG
               value: {{ .Values.deployment.kubeconfigPath }}
+            - name: POSTGRESQL_MASTER_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: postgresql-config
+                  key: POSTGRESQL_MASTER_HOST
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: postgres-password
           volumeMounts:
             - name: kube-config-volume
               mountPath: {{ .Values.deployment.volumeMountPath }}

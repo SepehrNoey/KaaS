@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-config
+data:
+  POSTGRESQL_MASTER_HOST: postgresql-primary
+  POSTGRESQL_SLAVE_HOST: postgresql-replica

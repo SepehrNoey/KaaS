@@ -11,7 +11,7 @@ deployment:
 
   image:
     repository: kaas-api
-    tag: v2.1
+    tag: v2.4
     pullPolicy: IfNotPresent
 
   containerPort: 2024

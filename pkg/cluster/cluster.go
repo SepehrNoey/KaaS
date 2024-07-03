@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/SepehrNoey/KaaS/api"
+	"github.com/jackc/pgx/v5"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -62,6 +64,11 @@ func NewClusterManager() (*ClusterManager, error) {
 		return nil, err
 	}
 
+	err = createHistoryTables(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
 	return &ClusterManager{
 		Clientset: clientset,
 		AppConf: AppCnfMap{
@@ -79,6 +86,47 @@ func NewClusterManager() (*ClusterManager, error) {
 			},
 		},
 	}, nil
+}
+
+func createHistoryTables(ctx context.Context) error {
+	masterHost := os.Getenv("POSTGRESQL_MASTER_HOST")
+	pass := os.Getenv("POSTGRESQL_PASSWORD")
+	masterURL := fmt.Sprintf("postgres://postgres:%s@%s:5432/postgres?sslmode=disable", pass, masterHost)
+
+	master, err := pgx.Connect(context.Background(), masterURL)
+	if err != nil {
+		return err
+	}
+
+	createPodTableSQL := `
+        CREATE TABLE IF NOT EXISTS pod_history (
+            pod_name TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            fail_count INT4 NOT NULL,
+            success_count INT4 NOT NULL,
+            last_failure TIMESTAMP NOT NULL,
+            last_success TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    `
+
+	_, err = master.Exec(ctx, createPodTableSQL)
+	if err != nil {
+		return err
+	}
+
+	createAppTableSQL := `
+        CREATE TABLE IF NOT EXISTS app_history (
+            app_name TEXT NOT NULL,
+            fail_count INT4 NOT NULL,
+            success_count INT4 NOT NULL,
+            last_failure TIMESTAMP NOT NULL,
+            last_success TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    `
+	_, err = master.Exec(ctx, createAppTableSQL)
+	return err
 }
 
 func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) error {
@@ -160,12 +208,18 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": appreq.Name},
+				MatchLabels: map[string]string{
+					"app":     appreq.Name,
+					"monitor": strconv.FormatBool(appreq.Monitor),
+				},
 			},
 			Replicas: &appreq.Replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": appreq.Name},
+					Labels: map[string]string{
+						"app":     appreq.Name,
+						"monitor": strconv.FormatBool(appreq.Monitor),
+					},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -201,9 +255,15 @@ func (c *ClusterManager) DeployApp(ctx context.Context, appreq *api.AppRequest) 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appreq.Name,
 			Namespace: namespace,
+			Labels: map[string]string{
+				"app":     appreq.Name,
+				"monitor": strconv.FormatBool(appreq.Monitor),
+			},
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{"app": appreq.Name},
+			Selector: map[string]string{
+				"app": appreq.Name,
+			},
 			Ports: []corev1.ServicePort{
 				{
 					Port: appreq.Port,

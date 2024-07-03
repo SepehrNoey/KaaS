@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor-endpoint
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: monitor-endpoint
+  template:
+    metadata:
+      labels:
+        app: monitor-endpoint
+    spec:
+      containers:
+        - name: monitor-endpoint
+          image: monitor-endpoint:v2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRESQL_SLAVE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: postgresql-config
+                  key: POSTGRESQL_MASTER_HOST
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: postgres-password
+          ports:
+            - containerPort: 2026
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"

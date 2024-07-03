@@ -1,0 +1,16 @@
+global:
+  postgresql:
+    auth:
+      existingSecret: postgresql-secret
+postgresqlPrimary:
+  enabled: false
+postgresqlReplica:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

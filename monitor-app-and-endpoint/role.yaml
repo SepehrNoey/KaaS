@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: configmap-access
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "pods", "services"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "create", "update", "delete", "patch"]

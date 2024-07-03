@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: schedule-updater-cronjob
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 50 # Ensuring job finishes within a minute
+      template:
+        spec:
+          containers:
+            - name: schedule-updater-cronjob
+              image: bitnami/kubectl:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  #!/bin/bash
+
+                  CONFIGMAP_NAME="schedule-configmap"
+                  CRONJOB_NAME="monitor-cronjob"
+                  NAMESPACE="default"
+                  CHECK_INTERVAL=5
+                  MAX_CHECKS=11
+
+                  checks=0
+
+                  while [ $checks -lt $MAX_CHECKS ]; do
+                    # getting the schedule from the ConfigMap
+                    NEW_SCHEDULE=$(kubectl get configmap $CONFIGMAP_NAME -n $NAMESPACE -o=jsonpath='{.data.schedule}')
+                    if [ $? -ne 0 ]; then
+                      echo "Error getting new schedule from ConfigMap"
+                      exit 1
+                    fi
+
+                    # getting the current schedule of the CronJob
+                    CURRENT_SCHEDULE=$(kubectl get cronjob $CRONJOB_NAME -n $NAMESPACE -o=jsonpath='{.spec.schedule}')
+                    if [ $? -ne 0 ]; then
+                      echo "Error getting current schedule from CronJob"
+                      exit 1
+                    fi
+
+                    # updating the CronJob schedule if it has changed
+                    if [ "$NEW_SCHEDULE" != "$CURRENT_SCHEDULE" ]; then
+                      kubectl patch cronjob $CRONJOB_NAME -n $NAMESPACE -p "{\"spec\" : {\"schedule\" : \"$NEW_SCHEDULE\"}}"
+                      if [ $? -eq 0 ]; then
+                        echo "Updated CronJob schedule to $NEW_SCHEDULE"
+                      else
+                        echo "Error updating CronJob schedule"
+                        exit 1
+                      fi
+                    fi
+
+                    checks=$(( $checks + 1 ))
+                    sleep $CHECK_INTERVAL
+                  done
+          restartPolicy: OnFailure

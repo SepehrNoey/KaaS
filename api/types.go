@@ -13,6 +13,7 @@ type AppRequest struct {
 	Envs           map[string]string `json:"envs"`
 	Secrets        map[string]string `json:"secrets"`
 	ExternalAccess bool              `json:"external_access"`
+	Monitor        bool              `json:"monitor"`
 }
 
 type PodStatus struct {
